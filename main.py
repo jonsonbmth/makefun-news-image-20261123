@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
-"""The World in One Day -- Monday 23 November 2026.
+"""The World in One Day -- Monday 23 November 2026. Version 2.
 
 A one-page newspaper drawn entirely in code (Python 3.13, standard
 library only). It sums up the world news of Monday 23 November 2026
 in a single 1024x1024 image, written to /output/entry.png
 (MAKEFUN_OUTPUT_DIR outside the grader).
 
-The paper was drawn early on Monday morning WIB, while the news day
-was still developing, so it leads with what Monday had already
-produced -- the Nepal-India talks in Delhi, the search resuming at
-dawn in Serang, the final day of the Wellington Test -- and it says
-plainly, in its DATE CHECK box, which big stories belong to other
-days and were left out on purpose, and which outcomes were still
-undecided when the paper was drawn.
+This is the second version of the entry. It was drawn late on
+Monday night WIB, once the day had actually happened, so it leads
+with what Monday really produced: Nvidia's board voting to bring
+Jensen Huang back as chief executive, Kyiv confirming it sank a
+Russian corvette off Libya, and the Wellington Test ending in a
+draw. Thirty-eight verified stories across seven regions, no
+forecasts dressed up as news, and a DATE CHECK box that says
+plainly which big stories belong to other days.
 
 Every story on the page was verified against a real wire or outlet
-(Reuters, AP, AFP, Al Jazeera, BBC, ABC, AAP, ESPNcricinfo, Xinhua,
-government releases). One-sided claims are labelled CLAIM and
-attributed; forecasts are labelled FORECAST.
+(Reuters, AP, AFP, CNN, WSJ, BBC, ESPNcricinfo, S&P Global,
+Stats NZ, USGS, UN News, Radio Nepal, IANS, Newspoll, BOM, PCHR,
+CAF, official releases). One-sided claims are labelled CLAIM and
+attributed; everything else is REPORTED or OFFICIAL.
 
-Layout follows the classic one-page front page: serif masthead with
-the day, a top strip naming the story and region counts, a red
-subhead with the three top stories, a key-numbers strip, a coloured
-region bar, a timeline of the day in UTC, three hero stories with
-drawn illustrations, ten secondaries, a world map with numbered
-pins, a numbered list of the remaining stories, a DATE CHECK box
-and a sources footer.
+Layout follows the classic one-page front page: a top bar, a
+count strip naming the stories and regions, a serif masthead with
+the day, a red subhead with the three top stories, a key-numbers
+strip, a coloured region bar, a timeline of the day in UTC, three
+hero stories with drawn illustrations, ten secondaries, a world
+map with numbered pins, a numbered list of the remaining stories,
+a DATE CHECK box and a sources footer.
 
 Everything is drawn by hand in this file: its own framebuffer
 rasterizer, its own hand-typed 5x7 bitmap font, its own vector
@@ -33,6 +35,7 @@ serif face for the masthead, and its own PNG encoder. No network,
 no randomness, no wall-clock time: two runs write identical bytes.
 """
 
+import math
 import os
 import struct
 import sys
@@ -42,29 +45,32 @@ W = 1024
 H = 1024
 
 # ---------------------------------------------------------------- palette
-PAPER = (247, 243, 232)      # warm newsprint cream
-PAPER2 = (255, 253, 246)     # lighter cream panel
-INK = (26, 26, 26)           # near-black text
-NAVY = (22, 38, 78)          # masthead + top bar
-NAVY2 = (30, 52, 104)
-RED = (178, 34, 28)          # subhead, banners, rules
-RED2 = (140, 22, 18)
-GOLD = (198, 158, 62)
-GREY = (110, 108, 100)
-LGREY = (210, 206, 194)
-RULE = (60, 58, 52)
-TEAL = (18, 110, 110)
-BLUE = (38, 90, 168)
-ORANGE = (196, 110, 20)
-PURPLE = (110, 74, 150)
-GREEN = (46, 128, 66)
-SKY = (168, 205, 232)
-SKYD = (120, 170, 210)
-SEA = (96, 150, 196)
-LAND = (232, 222, 196)
-LAND2 = (214, 200, 168)
+PAPER = (248, 244, 234)      # warm newsprint cream
+PANEL = (255, 253, 247)      # lighter cream panel
+INK = (24, 24, 24)           # near-black text
+NAVY = (20, 36, 76)          # masthead + top bar
+NAVY2 = (28, 50, 100)
+RED = (176, 32, 26)          # subhead, banners, rules
+REDDK = (138, 20, 16)
+GOLD = (200, 160, 64)
+GREY = (108, 106, 98)
+LGREY = (212, 208, 196)
+RULE = (58, 56, 50)
+TEAL = (16, 108, 108)
+BLUE = (36, 88, 166)
+ORANGE = (194, 108, 18)
+PURPLE = (108, 72, 148)
+GREEN = (44, 126, 64)
+SKY = (170, 206, 233)
+SEA = (94, 148, 194)
+SEADK = (70, 120, 170)
+LAND = (233, 223, 197)
+LAND2 = (212, 198, 166)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
+NVGRN = (118, 185, 0)        # Nvidia green
+FLAME = (255, 120, 20)
+SAND = (214, 196, 150)
 
 
 class FB:
@@ -120,22 +126,25 @@ class FB:
 
     def disc(self, cx, cy, r, c):
         for yy in range(cy - r, cy + r + 1):
-            dx = int((r * r - (yy - cy) * (yy - cy)) ** 0.5) if abs(yy - cy) <= r else -1
-            if dx >= 0:
-                self.rect(cx - dx, yy, 2 * dx + 1, 1, c)
+            dy = yy - cy
+            if abs(dy) > r:
+                continue
+            dx = int((r * r - dy * dy) ** 0.5)
+            self.rect(cx - dx, yy, 2 * dx + 1, 1, c)
 
     def circle(self, cx, cy, r, c):
-        # outline only
-        n = max(12, int(6.28 * r))
-        pts = []
+        n = max(16, int(2 * math.pi * r))
+        px, py = None, None
         for i in range(n + 1):
-            a = 6.2831853 * i / n
-            pts.append((int(cx + r * _cos(a)), int(cy + r * _sin(a))))
-        for i in range(len(pts) - 1):
-            self.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], c)
+            a = 2 * math.pi * i / n
+            qx = int(cx + r * math.cos(a))
+            qy = int(cy + r * math.sin(a))
+            if px is not None:
+                self.line(px, py, qx, qy, c)
+            px, py = qx, qy
 
     def poly(self, pts, c):
-        """Fill a polygon (scanline)."""
+        """Fill a polygon with a scanline fill."""
         if len(pts) < 3:
             return
         ys = [p[1] for p in pts]
@@ -164,27 +173,24 @@ class FB:
             t = i / steps
             self.disc(int(x0 + (x1 - x0) * t), int(y0 + (y1 - y0) * t), r, c)
 
+    def stroke(self, x0, y0, x1, y1, w, c):
+        """A square-capped thick segment, drawn as a filled quad.
 
-def _sin(a):
-    # small sine via Taylor around 0..2pi is overkill; use math-free table
-    return _SIN[int((a % 6.2831853) / 6.2831853 * 256) % 256]
-
-
-def _cos(a):
-    return _SIN[int(((a + 1.5707963) % 6.2831853) / 6.2831853 * 256) % 256]
-
-
-_SIN = []
-for _i in range(256):
-    _a = 6.2831853 * _i / 256
-    # Taylor series for sin, good to ~1e-4 here
-    _x = _a
-    _s = _x
-    _t = _x
-    for _k in range(1, 6):
-        _t *= -_x * _x / ((2 * _k) * (2 * _k + 1))
-        _s += _t
-    _SIN.append(_s)
+        Used for the serif masthead, where round caps would look
+        handwritten. Joints between segments are filled with a disc
+        by the caller.
+        """
+        dx, dy = x1 - x0, y1 - y0
+        length = (dx * dx + dy * dy) ** 0.5
+        if length < 0.5:
+            self.disc(x0, y0, max(1, w // 2), c)
+            return
+        nx = -dy / length * w / 2
+        ny = dx / length * w / 2
+        self.poly([(int(x0 + nx), int(y0 + ny)),
+                   (int(x1 + nx), int(y1 + ny)),
+                   (int(x1 - nx), int(y1 - ny)),
+                   (int(x0 - nx), int(y0 - ny))], c)
 
 
 # ---------------------------------------------------------------- PNG out
@@ -210,104 +216,106 @@ def write_png(fb, path):
 
 
 # ------------------------------------------------------- 5x7 bitmap font
-# Each glyph: 7 rows of 5 cells, '#' = ink. Hand-typed.
+# Each glyph: 7 rows of 5 cells, '1' = ink. Hand-typed.
 FONT = {}
-def _g(ch, rows):
+
+
+def _f(ch, rows):
     FONT[ch] = rows
 
-_g('A', ("01110","10001","10001","11111","10001","10001","10001"))
-_g('B', ("11110","10001","10001","11110","10001","10001","11110"))
-_g('C', ("01110","10001","10000","10000","10000","10001","01110"))
-_g('D', ("11110","10001","10001","10001","10001","10001","11110"))
-_g('E', ("11111","10000","10000","11110","10000","10000","11111"))
-_g('F', ("11111","10000","10000","11110","10000","10000","10000"))
-_g('G', ("01110","10001","10000","10111","10001","10001","01111"))
-_g('H', ("10001","10001","10001","11111","10001","10001","10001"))
-_g('I', ("01110","00100","00100","00100","00100","00100","01110"))
-_g('J', ("00111","00010","00010","00010","00010","10010","01100"))
-_g('K', ("10001","10010","10100","11000","10100","10010","10001"))
-_g('L', ("10000","10000","10000","10000","10000","10000","11111"))
-_g('M', ("10001","11011","10101","10101","10001","10001","10001"))
-_g('N', ("10001","11001","10101","10011","10001","10001","10001"))
-_g('O', ("01110","10001","10001","10001","10001","10001","01110"))
-_g('P', ("11110","10001","10001","11110","10000","10000","10000"))
-_g('Q', ("01110","10001","10001","10001","10101","10010","01101"))
-_g('R', ("11110","10001","10001","11110","10100","10010","10001"))
-_g('S', ("01111","10000","10000","01110","00001","00001","11110"))
-_g('T', ("11111","00100","00100","00100","00100","00100","00100"))
-_g('U', ("10001","10001","10001","10001","10001","10001","01110"))
-_g('V', ("10001","10001","10001","10001","10001","01010","00100"))
-_g('W', ("10001","10001","10001","10101","10101","11011","10001"))
-_g('X', ("10001","10001","01010","00100","01010","10001","10001"))
-_g('Y', ("10001","10001","01010","00100","00100","00100","00100"))
-_g('Z', ("11111","00001","00010","00100","01000","10000","11111"))
-_g('a', ("00000","00000","01110","00001","01111","10001","01111"))
-_g('b', ("10000","10000","11110","10001","10001","10001","11110"))
-_g('c', ("00000","00000","01110","10000","10000","10001","01110"))
-_g('d', ("00001","00001","01111","10001","10001","10001","01111"))
-_g('e', ("00000","00000","01110","10001","11111","10000","01110"))
-_g('f', ("00110","01001","01000","11110","01000","01000","01000"))
-_g('g', ("00000","01111","10001","10001","01111","00001","01110"))
-_g('h', ("10000","10000","11110","10001","10001","10001","10001"))
-_g('i', ("00100","00000","01100","00100","00100","00100","01110"))
-_g('j', ("00010","00000","00110","00010","00010","00010","01100"))
-_g('k', ("10000","10000","10010","10100","11000","10100","10010"))
-_g('l', ("01100","00100","00100","00100","00100","00100","01110"))
-_g('m', ("00000","00000","11010","10101","10101","10101","10101"))
-_g('n', ("00000","00000","11110","10001","10001","10001","10001"))
-_g('o', ("00000","00000","01110","10001","10001","10001","01110"))
-_g('p', ("00000","11110","10001","10001","11110","10000","10000"))
-_g('q', ("00000","00000","01111","10001","10001","01111","00001"))
-_g('r', ("00000","00000","10110","11001","10000","10000","10000"))
-_g('s', ("00000","00000","01111","10000","01110","00001","11110"))
-_g('t', ("01000","01000","11110","01000","01000","01001","00110"))
-_g('u', ("00000","00000","10001","10001","10001","10011","01101"))
-_g('v', ("00000","00000","10001","10001","10001","01010","00100"))
-_g('w', ("00000","00000","10001","10101","10101","10101","01010"))
-_g('x', ("00000","00000","10001","01010","00100","01010","10001"))
-_g('y', ("00000","00000","10001","10001","01111","00001","01110"))
-_g('z', ("00000","00000","11111","00010","00100","01000","11111"))
-_g('0', ("01110","10001","10011","10101","11001","10001","01110"))
-_g('1', ("00100","01100","00100","00100","00100","00100","01110"))
-_g('2', ("01110","10001","00001","00110","01000","10000","11111"))
-_g('3', ("11110","00001","00001","01110","00001","00001","11110"))
-_g('4', ("00010","00110","01010","10010","11111","00010","00010"))
-_g('5', ("11111","10000","11110","00001","00001","10001","01110"))
-_g('6', ("01110","10000","10000","11110","10001","10001","01110"))
-_g('7', ("11111","00001","00010","00100","01000","01000","01000"))
-_g('8', ("01110","10001","10001","01110","10001","10001","01110"))
-_g('9', ("01110","10001","10001","01111","00001","00001","01110"))
-_g('.', ("00000","00000","00000","00000","00000","01100","01100"))
-_g(',', ("00000","00000","00000","00000","01100","00100","01000"))
-_g(':', ("00000","01100","01100","00000","01100","01100","00000"))
-_g(';', ("00000","01100","01100","00000","01100","00100","01000"))
-_g('!', ("00100","00100","00100","00100","00100","00000","00100"))
-_g('?', ("01110","10001","00001","00110","00100","00000","00100"))
-_g("'", ("00100","00100","01000","00000","00000","00000","00000"))
-_g('"', ("01010","01010","00000","00000","00000","00000","00000"))
-_g('-', ("00000","00000","00000","01110","00000","00000","00000"))
-_g('(', ("00010","00100","01000","01000","01000","00100","00010"))
-_g(')', ("01000","00100","00010","00010","00010","00100","01000"))
-_g('/', ("00001","00010","00010","00100","01000","01000","10000"))
-_g('%', ("11001","11010","00010","00100","01000","01011","10011"))
-_g('&', ("01100","10010","10100","01000","10101","10010","01101"))
-_g('+', ("00000","00100","00100","11111","00100","00100","00000"))
-_g('=', ("00000","00000","11111","00000","11111","00000","00000"))
-_g('*', ("00000","10101","01110","11111","01110","10101","00000"))
-_g('#', ("01010","01010","11111","01010","11111","01010","01010"))
-_g('@', ("01110","10001","10111","10101","10110","10000","01110"))
-_g('_', ("00000","00000","00000","00000","00000","00000","11111"))
-_g('[', ("01110","01000","01000","01000","01000","01000","01110"))
-_g(']', ("01110","00010","00010","00010","00010","00010","01110"))
-_g('\u00b7', ("00000","00000","00000","01100","01100","00000","00000"))
-_g('\u2014', ("00000","00000","00000","11111","00000","00000","00000"))
-_g(' ', ("00000","00000","00000","00000","00000","00000","00000"))
 
-CHAR_W = 6  # 5 px glyph + 1 px gap, times scale
+_f('A', ("01110", "10001", "10001", "11111", "10001", "10001", "10001"))
+_f('B', ("11110", "10001", "10001", "11110", "10001", "10001", "11110"))
+_f('C', ("01110", "10001", "10000", "10000", "10000", "10001", "01110"))
+_f('D', ("11110", "10001", "10001", "10001", "10001", "10001", "11110"))
+_f('E', ("11111", "10000", "10000", "11110", "10000", "10000", "11111"))
+_f('F', ("11111", "10000", "10000", "11110", "10000", "10000", "10000"))
+_f('G', ("01110", "10001", "10000", "10111", "10001", "10001", "01111"))
+_f('H', ("10001", "10001", "10001", "11111", "10001", "10001", "10001"))
+_f('I', ("01110", "00100", "00100", "00100", "00100", "00100", "01110"))
+_f('J', ("00111", "00010", "00010", "00010", "00010", "10010", "01100"))
+_f('K', ("10001", "10010", "10100", "11000", "10100", "10010", "10001"))
+_f('L', ("10000", "10000", "10000", "10000", "10000", "10000", "11111"))
+_f('M', ("10001", "11011", "10101", "10101", "10001", "10001", "10001"))
+_f('N', ("10001", "11001", "10101", "10011", "10001", "10001", "10001"))
+_f('O', ("01110", "10001", "10001", "10001", "10001", "10001", "01110"))
+_f('P', ("11110", "10001", "10001", "11110", "10000", "10000", "10000"))
+_f('Q', ("01110", "10001", "10001", "10001", "10101", "10010", "01101"))
+_f('R', ("11110", "10001", "10001", "11110", "10100", "10010", "10001"))
+_f('S', ("01111", "10000", "10000", "01110", "00001", "00001", "11110"))
+_f('T', ("11111", "00100", "00100", "00100", "00100", "00100", "00100"))
+_f('U', ("10001", "10001", "10001", "10001", "10001", "10001", "01110"))
+_f('V', ("10001", "10001", "10001", "10001", "10001", "01010", "00100"))
+_f('W', ("10001", "10001", "10001", "10101", "10101", "11011", "10001"))
+_f('X', ("10001", "10001", "01010", "00100", "01010", "10001", "10001"))
+_f('Y', ("10001", "10001", "01010", "00100", "00100", "00100", "00100"))
+_f('Z', ("11111", "00001", "00010", "00100", "01000", "10000", "11111"))
+_f('a', ("00000", "00000", "01110", "00001", "01111", "10001", "01111"))
+_f('b', ("10000", "10000", "11110", "10001", "10001", "10001", "11110"))
+_f('c', ("00000", "00000", "01110", "10000", "10000", "10001", "01110"))
+_f('d', ("00001", "00001", "01111", "10001", "10001", "10001", "01111"))
+_f('e', ("00000", "00000", "01110", "10001", "11111", "10000", "01110"))
+_f('f', ("00110", "01001", "01000", "11110", "01000", "01000", "01000"))
+_f('g', ("00000", "01111", "10001", "10001", "01111", "00001", "01110"))
+_f('h', ("10000", "10000", "11110", "10001", "10001", "10001", "10001"))
+_f('i', ("00100", "00000", "01100", "00100", "00100", "00100", "01110"))
+_f('j', ("00010", "00000", "00110", "00010", "00010", "00010", "01100"))
+_f('k', ("10000", "10000", "10010", "10100", "11000", "10100", "10010"))
+_f('l', ("01100", "00100", "00100", "00100", "00100", "00100", "01110"))
+_f('m', ("00000", "00000", "11010", "10101", "10101", "10101", "10101"))
+_f('n', ("00000", "00000", "11110", "10001", "10001", "10001", "10001"))
+_f('o', ("00000", "00000", "01110", "10001", "10001", "10001", "01110"))
+_f('p', ("00000", "11110", "10001", "10001", "11110", "10000", "10000"))
+_f('q', ("00000", "00000", "01111", "10001", "10001", "01111", "00001"))
+_f('r', ("00000", "00000", "10110", "11001", "10000", "10000", "10000"))
+_f('s', ("00000", "00000", "01111", "10000", "01110", "00001", "11110"))
+_f('t', ("01000", "01000", "11110", "01000", "01000", "01001", "00110"))
+_f('u', ("00000", "00000", "10001", "10001", "10001", "10011", "01101"))
+_f('v', ("00000", "00000", "10001", "10001", "10001", "01010", "00100"))
+_f('w', ("00000", "00000", "10001", "10101", "10101", "10101", "01010"))
+_f('x', ("00000", "00000", "10001", "01010", "00100", "01010", "10001"))
+_f('y', ("00000", "00000", "10001", "10001", "01111", "00001", "01110"))
+_f('z', ("00000", "00000", "11111", "00010", "00100", "01000", "11111"))
+_f('0', ("01110", "10001", "10011", "10101", "11001", "10001", "01110"))
+_f('1', ("00100", "01100", "00100", "00100", "00100", "00100", "01110"))
+_f('2', ("01110", "10001", "00001", "00110", "01000", "10000", "11111"))
+_f('3', ("11110", "00001", "00001", "01110", "00001", "00001", "11110"))
+_f('4', ("00010", "00110", "01010", "10010", "11111", "00010", "00010"))
+_f('5', ("11111", "10000", "11110", "00001", "00001", "10001", "01110"))
+_f('6', ("01110", "10000", "10000", "11110", "10001", "10001", "01110"))
+_f('7', ("11111", "00001", "00010", "00100", "01000", "01000", "01000"))
+_f('8', ("01110", "10001", "10001", "01110", "10001", "10001", "01110"))
+_f('9', ("01110", "10001", "10001", "01111", "00001", "00001", "01110"))
+_f('.', ("00000", "00000", "00000", "00000", "00000", "01100", "01100"))
+_f(',', ("00000", "00000", "00000", "00000", "01100", "00100", "01000"))
+_f(':', ("00000", "01100", "01100", "00000", "01100", "01100", "00000"))
+_f(';', ("00000", "01100", "01100", "00000", "01100", "00100", "01000"))
+_f('!', ("00100", "00100", "00100", "00100", "00100", "00000", "00100"))
+_f('?', ("01110", "10001", "00001", "00110", "00100", "00000", "00100"))
+_f("'", ("00100", "00100", "01000", "00000", "00000", "00000", "00000"))
+_f('"', ("01010", "01010", "00000", "00000", "00000", "00000", "00000"))
+_f('-', ("00000", "00000", "00000", "01110", "00000", "00000", "00000"))
+_f('(', ("00010", "00100", "01000", "01000", "01000", "00100", "00010"))
+_f(')', ("01000", "00100", "00010", "00010", "00010", "00100", "01000"))
+_f('/', ("00001", "00010", "00010", "00100", "01000", "01000", "10000"))
+_f('%', ("11001", "11010", "00010", "00100", "01000", "01011", "10011"))
+_f('&', ("01100", "10010", "10100", "01000", "10101", "10010", "01101"))
+_f('+', ("00000", "00100", "00100", "11111", "00100", "00100", "00000"))
+_f('=', ("00000", "00000", "11111", "00000", "11111", "00000", "00000"))
+_f('*', ("00000", "10101", "01110", "11111", "01110", "10101", "00000"))
+_f('#', ("01010", "01010", "11111", "01010", "11111", "01010", "01010"))
+_f('@', ("01110", "10001", "10111", "10101", "10110", "10000", "01110"))
+_f('_', ("00000", "00000", "00000", "00000", "00000", "00000", "11111"))
+_f('[', ("01110", "01000", "01000", "01000", "01000", "01000", "01110"))
+_f(']', ("01110", "00010", "00010", "00010", "00010", "00010", "01110"))
+_f('$', ("00100", "01111", "10100", "01110", "00101", "11110", "00100"))
+_f(' ', ("00000", "00000", "00000", "00000", "00000", "00000", "00000"))
+
+CELL = 6  # 5 px glyph + 1 px gap, times scale
 
 
 def text_w(s, scale):
-    return len(s) * CHAR_W * scale
+    return len(s) * CELL * scale
 
 
 def draw_text(fb, x, y, s, scale, color):
@@ -322,7 +330,7 @@ def draw_text(fb, x, y, s, scale, color):
             for c in range(5):
                 if row[c] == '1':
                     fb.rect(cx + c * scale, y + r * scale, scale, scale, color)
-        cx += CHAR_W * scale
+        cx += CELL * scale
     return cx - x
 
 
@@ -354,7 +362,7 @@ def wrap(s, scale, max_w):
 
 def para(fb, x, y, s, scale, max_w, color, leading=None, max_lines=None):
     """Draw a wrapped paragraph; returns the y after the last line."""
-    lh = (leading if leading is not None else 9 * scale)
+    lh = leading if leading is not None else 9 * scale
     lines = wrap(s, scale, max_w)
     if max_lines is not None:
         lines = lines[:max_lines]
@@ -365,69 +373,75 @@ def para(fb, x, y, s, scale, max_w, color, leading=None, max_lines=None):
 
 
 # ------------------------------------------------------- vector serif face
-# The masthead is set in a hand-drawn serif face: each glyph is a list
-# of polylines on a 0..64 wide, 0..80 tall grid (baseline 80, x-height
-# top 30, descenders to 100). Strokes are drawn thick with small serif
-# ticks at the feet and heads of the stems, so the big date reads as a
-# newspaper serif rather than a pixel font.
+# The masthead is set in a hand-drawn serif face: each glyph is a
+# list of strokes, each stroke a polyline on a 0..64 wide, 0..80
+# tall grid (baseline 80, x-height top 30, descenders to 100).
+# Strokes are drawn with square caps and small serif ticks at the
+# feet and heads of the stems, so the big date reads as a newspaper
+# serif rather than a pixel font or handwriting.
 SERIF_W = {
-    'M': 66, 'o': 46, 'n': 48, 'd': 48, 'a': 46, 'y': 48, ' ': 22,
-    '2': 48, '3': 46, 'N': 62, 'v': 50, 'e': 46, 'm': 68, 'b': 48,
+    'M': 64, 'o': 48, 'n': 48, 'd': 48, 'a': 46, 'y': 48, ' ': 22,
+    '2': 48, '3': 46, 'N': 62, 'v': 50, 'e': 46, 'm': 66, 'b': 48,
     'r': 40, '6': 46, '0': 48,
 }
+# Each entry: list of (points, closed) strokes.
 SERIF = {
-    # (points, closed?) -- strokes drawn thick; serifs added separately
-    'M': ([(6, 2), (6, 78), (33, 40), (60, 2), (60, 78)], False),
-    'o': ([(23, 30), (36, 32), (43, 44), (43, 62), (36, 76), (23, 78),
-           (10, 76), (3, 62), (3, 44), (10, 32), (23, 30)], True),
-    'n': ([(5, 78), (5, 40), (10, 32), (20, 30), (30, 32), (38, 40),
-           (43, 52), (43, 78)], False),
-    'd': ([(24, 30), (37, 32), (44, 44), (44, 62), (37, 76), (24, 78),
-           (11, 76), (4, 62), (4, 44), (11, 32), (24, 30)], True),
-    'a': ([(23, 34), (36, 36), (41, 48), (41, 64), (34, 76), (21, 78),
-           (10, 74), (5, 62), (5, 48), (12, 36), (23, 34)], True),
-    'y': ([(5, 30), (23, 62), (41, 30)], False),
-    '2': ([(8, 16), (16, 4), (30, 4), (40, 12), (36, 26), (12, 64),
-           (6, 78), (42, 78)], False),
-    '3': ([(10, 6), (22, 2), (34, 6), (40, 16), (34, 30), (24, 34),
+    'M': [([(4, 78), (4, 4), (31, 44), (58, 4), (58, 78)], False)],
+    'o': [([(22, 30), (32, 30), (40, 38), (42, 54), (40, 68), (32, 76),
+           (22, 76), (12, 68), (10, 54), (12, 38)], True)],
+    'n': [([(6, 78), (6, 40), (10, 32), (20, 30), (30, 32), (38, 40),
+           (42, 52), (42, 78)], False)],
+    'd': [([(20, 30), (30, 32), (36, 42), (36, 62), (30, 74), (20, 76),
+           (10, 74), (4, 62), (4, 42), (10, 32)], True),
+          ([(42, 4), (42, 78)], False)],
+    'a': [([(20, 32), (32, 34), (38, 46), (38, 64), (32, 76), (20, 78),
+           (10, 74), (4, 62), (4, 46), (10, 34)], True),
+          ([(38, 34), (38, 78)], False)],
+    'y': [([(6, 30), (22, 62), (40, 30)], False),
+          ([(22, 62), (12, 96)], False)],
+    '2': [([(8, 14), (16, 4), (30, 4), (40, 12), (36, 26), (14, 62),
+           (8, 78), (42, 78)], False)],
+    '3': [([(10, 6), (22, 2), (34, 6), (40, 16), (34, 30), (24, 34),
            (34, 40), (40, 52), (36, 68), (26, 78), (12, 76), (6, 68)],
-          False),
-    'N': ([(6, 2), (6, 78), (56, 2), (56, 78)], False),
-    'v': ([(5, 30), (25, 78), (45, 30)], False),
-    'e': ([(40, 50), (38, 34), (30, 30), (16, 30), (6, 38), (4, 54),
+          False)],
+    'N': [([(6, 78), (6, 4), (56, 78), (56, 4)], False)],
+    'v': [([(4, 30), (24, 78), (44, 30)], False)],
+    'e': [([(40, 52), (36, 34), (28, 30), (16, 30), (6, 38), (4, 54),
            (8, 70), (20, 78), (34, 76), (42, 66)], False),
-    'm': ([(5, 78), (5, 40), (10, 32), (20, 30), (28, 34), (32, 42),
-           (32, 78), (32, 42), (38, 32), (48, 30), (56, 34), (62, 42),
-           (62, 78)], False),
-    'b': ([(5, 2), (5, 78), (5, 54), (14, 32), (26, 30), (38, 34),
-           (44, 48), (44, 62), (36, 76), (24, 78), (12, 76), (5, 64)],
-          False),
-    'r': ([(5, 78), (5, 40), (10, 32), (20, 30), (30, 32), (36, 38)],
-          False),
-    '6': ([(38, 8), (26, 2), (14, 8), (6, 20), (4, 40), (8, 58),
+          ([(6, 52), (38, 52)], False)],
+    'm': [([(4, 78), (4, 40), (8, 32), (18, 30), (26, 34), (30, 42),
+           (30, 78)], False),
+          ([(30, 42), (36, 32), (46, 30), (54, 34), (60, 42), (60, 78)],
+           False)],
+    'b': [([(4, 4), (4, 78)], False),
+          ([(4, 54), (12, 32), (24, 30), (36, 34), (42, 48), (42, 62),
+           (36, 76), (24, 78), (12, 76), (4, 64)], True)],
+    'r': [([(4, 78), (4, 40), (8, 32), (18, 30), (28, 32), (34, 38)],
+          False)],
+    '6': [([(38, 10), (26, 2), (14, 8), (6, 22), (4, 42), (8, 60),
            (18, 76), (30, 78), (40, 70), (44, 56), (40, 42), (30, 38),
-           (18, 40), (10, 48), (8, 58)], False),
-    '0': ([(24, 2), (36, 4), (44, 16), (44, 62), (36, 76), (24, 78),
-           (12, 76), (4, 62), (4, 16), (12, 4), (24, 2)], True),
+           (18, 40), (10, 48), (8, 58)], False)],
+    '0': [([(24, 2), (36, 4), (44, 16), (44, 62), (36, 76), (24, 78),
+           (12, 76), (4, 62), (4, 16), (12, 4)], True)],
 }
-# serif ticks: (x, y, half-length) horizontal bars at stem ends
+# Serif ticks: (x, y, half-length) horizontal bars at stem ends.
 SERIF_TICKS = {
-    'M': [(6, 2, 6), (60, 2, 6), (6, 78, 6), (60, 78, 6)],
-    'N': [(6, 2, 6), (56, 2, 6), (6, 78, 6), (56, 78, 6)],
-    'n': [(5, 78, 5), (43, 78, 5), (5, 30, 5)],
-    'd': [(44, 2, 5), (44, 78, 5)],
-    'a': [(41, 78, 5)],
-    'y': [(23, 96, 5)],
-    '2': [(6, 78, 6), (42, 78, 6)],
+    'M': [(4, 4, 6), (58, 4, 6), (4, 78, 6), (58, 78, 6)],
+    'N': [(6, 4, 6), (56, 4, 6), (6, 78, 6), (56, 78, 6)],
+    'n': [(6, 78, 5), (42, 78, 5), (6, 32, 5)],
+    'd': [(42, 4, 5), (42, 78, 5)],
+    'a': [(38, 78, 5)],
+    'y': [(12, 96, 5)],
+    '2': [(8, 78, 6), (42, 78, 6)],
     '3': [(10, 6, 5), (12, 76, 5)],
-    'v': [(5, 30, 5), (45, 30, 5)],
+    'v': [(4, 30, 5), (44, 30, 5)],
     'e': [(4, 54, 5)],
-    'm': [(5, 78, 5), (32, 78, 5), (62, 78, 5)],
-    'b': [(5, 2, 5), (5, 78, 5)],
-    'r': [(5, 78, 5)],
-    '6': [(38, 8, 5)],
-    '0': [],
+    'm': [(4, 78, 5), (30, 78, 5), (60, 78, 5)],
+    'b': [(4, 4, 5), (4, 78, 5)],
+    'r': [(4, 78, 5)],
+    '6': [(38, 10, 5)],
     'o': [],
+    '0': [],
 }
 
 
@@ -439,31 +453,23 @@ def serif_w(s, scale):
 
 
 def draw_serif(fb, x, y, s, scale, color):
-    """Draw the masthead face. scale: cap-height in px / 80."""
-    cap = 80 * scale // 50  # not used directly; strokes scale below
+    """Draw the masthead face. Grid units map at scale/50 px."""
+    w = max(3, scale // 4)  # bold stroke weight
     cx = x
     for ch in s:
         if ch == ' ':
             cx += SERIF_W[' '] * scale // 50
             continue
-        pts, _closed = SERIF[ch]
-        w = max(2, scale // 6)  # stroke width
-        for i in range(len(pts) - 1):
-            x0 = cx + pts[i][0] * scale // 50
-            y0 = y + pts[i][1] * scale // 50
-            x1 = cx + pts[i + 1][0] * scale // 50
-            y1 = y + pts[i + 1][1] * scale // 50
-            fb.thick_line(x0, y0, x1, y1, w, color)
-        if _closed:
-            x0 = cx + pts[-1][0] * scale // 50
-            y0 = y + pts[-1][1] * scale // 50
-            x1 = cx + pts[0][0] * scale // 50
-            y1 = y + pts[0][1] * scale // 50
-            fb.thick_line(x0, y0, x1, y1, w, color)
-        # 'y' tail: the diagonal polyline ends at the join; draw the tail
-        if ch == 'y':
-            fb.thick_line(cx + 23 * scale // 50, y + 62 * scale // 50,
-                          cx + 12 * scale // 50, y + 96 * scale // 50, w, color)
+        for pts, closed in SERIF[ch]:
+            scaled = [(cx + px * scale // 50, y + py * scale // 50)
+                      for px, py in pts]
+            segs = list(zip(scaled, scaled[1:]))
+            if closed:
+                segs.append((scaled[-1], scaled[0]))
+            for (x0, y0), (x1, y1) in segs:
+                fb.stroke(x0, y0, x1, y1, w, color)
+            for (jx, jy) in scaled:
+                fb.disc(jx, jy, max(1, w // 2), color)
         for (tx, ty, hl) in SERIF_TICKS.get(ch, []):
             fb.rect(cx + (tx - hl) * scale // 50, y + ty * scale // 50,
                     2 * hl * scale // 50, max(2, w // 2), color)
@@ -472,145 +478,178 @@ def draw_serif(fb, x, y, s, scale, color):
 
 
 # ------------------------------------------------------------- story data
-# Every story verified against a real outlet on 23 Nov 2026 (or, for
-# scheduled items, set to happen that day). Status: OFFICIAL / REPORTED
-# / CLAIM / FORECAST. Sources are named on the page itself.
+# Every story verified against a real outlet on 23-24 Nov 2026.
+# Status: OFFICIAL / REPORTED / CLAIM. No forecasts on this page:
+# what had not happened yet when the page was drawn is named in
+# the DATE CHECK box instead.
 HEROES = [
     dict(
-        n=1, place="NEW DELHI, INDIA", region="ASIA-PACIFIC",
-        kicker="TALKS TODAY", badge="REPORTED",
-        head="Shah meets Modi in Delhi on his first state visit",
-        body=("Nepal's Balendra Shah holds delegation-level talks with "
-              "Narendra Modi today, with MoUs on education, health, "
-              "energy and farming to be signed and a joint press "
-              "conference to follow."),
-        src="IANS - New Kerala - Radio Nepal",
-        scene="delhi",
+        n=1, place="SANTA CLARA, USA", region="NORTH AMERICA",
+        kicker="BOARD VOTES MONDAY", badge="REPORTED",
+        head="Huang is back: Nvidia reinstates its ousted chief",
+        body=("The board voted unanimously to bring Jensen Huang back as "
+              "chief executive, 11 days after he quit over affairs "
+              "including one with an alleged Chinese spy. Shares jumped "
+              "33% and the Nasdaq 6%."),
+        src="Reuters - WSJ - CNN",
+        scene="chip",
     ),
     dict(
-        n=2, place="SERANG, INDONESIA", region="ASIA-PACIFIC",
-        kicker="24 BODY BAGS OUT", badge="REPORTED",
-        head="Search resumes at dawn in the burnt-out candy factory",
-        body=("Rescuers go back in at 7am after a night's halt at the "
-              "PT Fonusa Agung Mulia plant in Cikande, where Saturday's "
-              "fire left 29 workers missing and eight more unaccounted "
-              "for. Police have removed 24 body bags."),
-        src="Reuters - AP - Detik",
-        scene="factory",
+        n=2, place="OFF BENGHAZI, LIBYA", region="EUROPE",
+        kicker="SEVEN SEA DRONES", badge="REPORTED",
+        head="Kyiv says it sank a Russian corvette off Libya",
+        body=("Zelensky confirmed on Monday that seven naval drones sank "
+              "the Merkury, a corvette commissioned in 2023, off "
+              "Benghazi, destroying a Ka-27 helicopter. A cargo ship "
+              "said to carry weapons was also hit."),
+        src="CNN - France 24 - UN News",
+        scene="ship",
     ),
     dict(
         n=3, place="WELLINGTON, NEW ZEALAND", region="OCEANIA",
-        kicker="DAY 5 - INDIA NEED 8 WICKETS", badge="REPORTED",
-        head="New Zealand fight to save the Test after India's 720",
-        body=("India declared on 720 for 9, the highest Test total ever "
-              "in New Zealand, with centuries from Rahul (136) and Pant "
-              "(128). The hosts were 119 for 2 at stumps, still 233 "
-              "behind, with Conway unbeaten on 59."),
-        src="ESPNcricinfo - Cricbuzz - IANS",
+        kicker="DAY 5 - DRAWN", badge="REPORTED",
+        head="Mitchell and Phillips bat out a draw for New Zealand",
+        body=("The hosts closed on 239 for 5, batting 120 overs to save "
+              "the Test after India's 720 for 9 declared, the biggest "
+              "innings total ever in New Zealand. Mitchell made 49 off "
+              "186 balls, Phillips 26 off 126."),
+        src="ESPNcricinfo - AP - ICC",
         scene="cricket",
     ),
 ]
 
 SECONDARIES = [
-    dict(n=4, place="SYDNEY, AUSTRALIA", region="OCEANIA", kicker="FIRST FLIGHT",
+    dict(n=4, place="SERANG, INDONESIA", region="ASIA", kicker="24 DEAD",
+         badge="REPORTED",
+         head="Serang fire: 24 dead confirmed as search goes on",
+         body="About 30 are still missing at the candy factory.",
+         src="Reuters - AP", scene="factory"),
+    dict(n=5, place="NEW DELHI, INDIA", region="ASIA", kicker="STATE VISIT",
+         badge="REPORTED",
+         head="Modi offers Nepal $1.6bn for flood rebuilding",
+         body="Shah and Modi talk energy, rail and trade in Delhi.",
+         src="Radio Nepal - IANS", scene="delhi"),
+    dict(n=6, place="KYIV, UKRAINE", region="EUROPE", kicker="DAY 1,734",
+         badge="REPORTED",
+         head="Russian strikes kill 14 across Ukraine",
+         body="Ten die as a five-storey block collapses in Dymer.",
+         src="Reuters - AP", scene="kyiv"),
+    dict(n=7, place="GAZA", region="MIDDLE EAST", kicker="JABALIA CAMP",
+         badge="REPORTED",
+         head="Israeli strike kills UNRWA worker in Gaza",
+         body="Adel Al-Helo dies near a water well; three wounded.",
+         src="Reuters", scene="gaza"),
+    dict(n=8, place="MEXICO CITY, MEXICO", region="NORTH AMERICA",
+         kicker="SUNDAY NIGHT", badge="REPORTED",
+         head="49ers rout Vikings 35-10 in Mexico City",
+         body="Purdy throws three touchdowns; 49ers now 9-1.",
+         src="NBC Sports - AP", scene="football"),
+    dict(n=9, place="EUROPE", region="EUROPE", kicker="FLASH PMI",
          badge="OFFICIAL",
-         head="Wong lands on the first flight into Western Sydney",
-         body="Singapore's PM arrives for a three-day visit.",
-         src="PM of Australia", scene="plane"),
-    dict(n=5, place="CANBERRA, AUSTRALIA", region="OCEANIA", kicker="NEWSPOLL",
-         badge="REPORTED",
-         head="Albanese trails Taylor as preferred PM for the first time",
-         body="The PM falls behind the Coalition leader in a new poll.",
-         src="The Squiz - SMH", scene="poll"),
-    dict(n=6, place="TOKYO, JAPAN", region="ASIA-PACIFIC", kicker="HOLIDAY",
+         head="Eurozone holds at 51.7; Germany hits 55.0",
+         body="France falls to 46.2, a six-month low.",
+         src="S&P Global - Reuters", scene="chart"),
+    dict(n=10, place="NEW YORK, USA", region="NORTH AMERICA",
+         kicker="FLASH PMI", badge="OFFICIAL",
+         head="US growth cools: flash PMI down to 54.6",
+         body="A four-month low, yet still near 3% GDP pace.",
+         src="S&P Global - Reuters", scene="chart2"),
+    dict(n=11, place="WELLINGTON, NZ", region="OCEANIA", kicker="Q3 RETAIL",
          badge="OFFICIAL",
-         head="Japan's markets shut for Labor Thanksgiving Day",
-         body="Tokyo equities and bonds do not trade today.",
-         src="JPX - InvestingLive", scene="gate"),
-    dict(n=7, place="SUVA, FIJI", region="OCEANIA", kicker="M4.6",
+         head="NZ shops enjoy best quarter since 2021",
+         body="Sales volumes jump 2.2%, four times forecast.",
+         src="Stats NZ", scene="retail"),
+    dict(n=12, place="CANBERRA, AUSTRALIA", region="OCEANIA",
+         kicker="NEWSPOLL", badge="REPORTED",
+         head="Taylor passes Albanese as preferred PM",
+         body="The Coalition leader leads 42-41 for the first time.",
+         src="Newspoll - The Australian", scene="poll"),
+    dict(n=13, place="VANUATU", region="OCEANIA", kicker="M6.5",
          badge="REPORTED",
-         head="Quake shakes the sea south of Fiji at 7.03am local time",
-         body="A magnitude 4.6 tremor south of the Fiji Islands.",
-         src="Volcano Discovery", scene="quake"),
-    dict(n=8, place="SYDNEY, AUSTRALIA", region="OCEANIA", kicker="FORECAST",
-         badge="FORECAST",
-         head="Storms, hail and 45-knot gusts due over Sydney today",
-         body="A 30% chance of heavy afternoon thunderstorms.",
-         src="Sydney Airport bulletin", scene="storm"),
-    dict(n=9, place="EUROPE", region="EUROPE", kicker="DUE TODAY",
-         badge="FORECAST",
-         head="Flash PMIs land today in the eurozone, Britain and Germany",
-         body="November's first read on factories and services.",
-         src="S&P Global - Dow Jones", scene="chart"),
-    dict(n=10, place="MELBOURNE, AUSTRALIA", region="OCEANIA", kicker="POLLS",
-         badge="REPORTED",
-         head="Victoria: Coalition leads Labor 55-45 six days out",
-         body="Polls point to a Coalition majority on Saturday.",
-         src="InSnip - Herald Sun", scene="ballot"),
-    dict(n=11, place="CANBERRA, AUSTRALIA", region="OCEANIA", kicker="LAST WEEK",
-         badge="REPORTED",
-         head="Parliament's final sitting week opens with a gas fight",
-         body="Labor pushes its gas reservation plan this week.",
-         src="The Squiz - SMH", scene="parliament"),
-    dict(n=12, place="DELHI, INDIA", region="ASIA-PACIFIC", kicker="GURPURAB",
-         badge="REPORTED",
-         head="Sikhs mark Guru Nanak's birth with processions in Delhi",
-         body="A Nagar Kirtan winds from Chandni Chowk to Nanak Piao.",
-         src="Delhi Police - Observer Voice", scene="procession"),
-    dict(n=13, place="SANTA CLARA, USA", region="AMERICAS", kicker="01:20 UTC",
-         badge="FORECAST",
-         head="Vikings at 49ers kick off after midnight UTC",
-         body="Sunday-night football starts at 8.20pm in California.",
-         src="NFL - Reuters", scene="football"),
+         head="Deep M6.5 quake shakes Vanuatu region",
+         body="The tremor struck 598 km down; no tsunami alert.",
+         src="USGS", scene="quake"),
 ]
 
 # The rest of the day, numbered on from the secondaries.
 MORE = [
-    ("WELLINGTON, NZ", "OCEANIA", "NZ retail sales due today", "Stats NZ", "FORECAST"),
-    ("SYDNEY, AUSTRALIA", "OCEANIA", "Australia's flash PMIs due today", "S&P Global", "FORECAST"),
-    ("TAIPEI, TAIWAN", "ASIA-PACIFIC", "Jobless rate and M2 money due today", "DGBAS", "FORECAST"),
-    ("BEIJING, CHINA", "ASIA-PACIFIC", "China's PMIs due today", "NBS", "FORECAST"),
-    ("NEW YORK, USA", "AMERICAS", "NY Fed's Williams speaks today", "Fed", "FORECAST"),
-    ("SEOUL, KOREA", "ASIA-PACIFIC", "Five-year bond auction today", "MoEF", "FORECAST"),
-    ("ANTALYA, TURKIYE", "WORLD", "COP31 fallout: Bowen faces a $150m cost row", "The Squiz", "REPORTED"),
-    ("ADDIS ABABA, ETHIOPIA", "WORLD", "COP32 inherits the deadlock next year", "UN News", "REPORTED"),
-    ("WASHINGTON, USA", "AMERICAS", "Schumer turns 76 today; Senate vote on 1 Dec", "Reuters", "REPORTED"),
-    ("PHNOM PENH, CAMBODIA", "ASIA-PACIFIC", "Cambodia shut today for the water festival", "Govt", "OFFICIAL"),
-    ("NEW YORK, USA", "AMERICAS", "US data week: core PCE and Q3 GDP on Wed", "Dow Jones", "FORECAST"),
-    ("NEW YORK, USA", "AMERICAS", "Earnings today: Medtronic, Zoom, HPE report", "Substack", "FORECAST"),
-    ("SEOUL, KOREA", "ASIA-PACIFIC", "Rail strike put off to Thu; trains run today", "Aju Press", "REPORTED"),
-    ("SEOUL, KOREA", "ASIA-PACIFIC", "Metro strike threat hangs over Wednesday", "Aju Press", "REPORTED"),
-    ("PARBHANI, INDIA", "ASIA-PACIFIC", "Mourners pay respects to MP Wadkute today", "News Nation", "REPORTED"),
-    ("DELHI, INDIA", "ASIA-PACIFIC", "Traffic curbs for VIP movement at Rajghat", "Delhi Police", "OFFICIAL"),
-    ("NEW YORK, USA", "AMERICAS", "US flash PMIs due today", "S&P Global", "FORECAST"),
-    ("HYDERABAD, INDIA", "ASIA-PACIFIC", "Students' protest over casteist remarks goes on", "Observer Voice", "REPORTED"),
-    ("BUJUMBURA, BURUNDI", "AFRICA", "Burundi begins vetting election candidates", "Khusoko", "REPORTED"),
+    ("BRASILIA, BRAZIL", "SOUTH AMERICA",
+     "Bolsonaro stable in ICU; endoscopy 'positive'", "The Times", "REPORTED"),
+    ("BRASILIA, BRAZIL", "SOUTH AMERICA",
+     "Lower house votes on Lula's fiscal bill", "Rio Times", "REPORTED"),
+    ("CUCUTA, COLOMBIA", "SOUTH AMERICA",
+     "Drones reportedly hit police command", "Rio Times", "REPORTED"),
+    ("LIMA, PERU", "SOUTH AMERICA",
+     "Bank group IFS profit flat at $134m in Q3", "Rio Times", "REPORTED"),
+    ("CENTRAL ANDES, PERU", "SOUTH AMERICA",
+     "Quake toll stands at one as aftershocks go on", "Rio Times", "REPORTED"),
+    ("ABUJA, NIGERIA", "AFRICA",
+     "Central bank sets $11m floor for stablecoins", "Rio Times", "REPORTED"),
+    ("SAO TOME", "AFRICA",
+     "Americo Ramos reappointed prime minister", "C54 News", "REPORTED"),
+    ("NAIROBI, KENYA", "AFRICA",
+     "Kenya discharges its last Ebola patient", "C54 News", "REPORTED"),
+    ("ACCRA, GHANA", "AFRICA",
+     "Ghana unveils 'Heritage Series' banknotes", "C54 News", "REPORTED"),
+    ("LAGOS, NIGERIA", "AFRICA",
+     "AFRIFF film festival opens with 23 features", "C54 News", "REPORTED"),
+    ("BANJUL, GAMBIA", "AFRICA",
+     "Gambia declares a monkeypox outbreak", "Access24", "REPORTED"),
+    ("NAIROBI, KENYA", "AFRICA",
+     "Police fire tear gas at small Nairobi protest", "Access24", "REPORTED"),
+    ("SEOUL, KOREA", "ASIA",
+     "Korail slowdown starts; metro strike set Wed", "Aju Press", "REPORTED"),
+    ("TOKYO, JAPAN", "ASIA",
+     "Japan's markets shut for Labor Thanksgiving", "JPX", "OFFICIAL"),
+    ("SYDNEY, AUSTRALIA", "OCEANIA",
+     "Severe storm warning: hail, gusts, floods", "BOM", "OFFICIAL"),
+    ("HONG KONG", "ASIA",
+     "Beijing hails Sunday's election committee vote", "China Daily", "REPORTED"),
+    ("ANTALYA, TURKIYE", "EUROPE",
+     "COP31 fallout: focus shifts to COP32 in Addis", "UN News", "REPORTED"),
+    ("GAZA", "MIDDLE EAST",
+     "Report: 15 Palestinians killed 19-22 Nov", "PCHR", "REPORTED"),
+    ("PERM, RUSSIA", "EUROPE",
+     "Ukrainian drone kills one in Perm region", "Reuters", "REPORTED"),
+    ("ABU DHABI", "MIDDLE EAST",
+     "Kremlin: new trilateral talks may be held soon", "Reuters", "REPORTED"),
+    ("MELBOURNE, AUSTRALIA", "OCEANIA",
+     "Victoria: Coalition leads 58-42, six days out", "Redbridge", "REPORTED"),
+    ("LONDON, UK", "EUROPE",
+     "UK flash PMI eases to 52.3 from 52.9", "S&P Global", "OFFICIAL"),
+    ("MEXICO CITY, MEXICO", "NORTH AMERICA",
+     "Mexico keeps arresting CJNG commanders", "Rio Times", "REPORTED"),
+    ("ABUJA, NIGERIA", "AFRICA",
+     "Tinubu vows power and water fix after outage", "Rio Times", "REPORTED"),
+    ("CAIRO, EGYPT", "AFRICA",
+     "Coca-Cola named AFCON 2027 sponsor", "CAF - APO", "REPORTED"),
 ]
 
-# Region counts, in bar order.
+# Region counts, in bar order. They sum to TOTAL_STORIES.
 REGIONS = [
-    ("ASIA-PACIFIC", 13, TEAL),
-    ("OCEANIA", 9, BLUE),
-    ("AMERICAS", 6, ORANGE),
-    ("WORLD", 2, GREY),
-    ("EUROPE", 1, PURPLE),
-    ("AFRICA", 1, GREEN),
+    ("AFRICA", 9, GREEN),
+    ("OCEANIA", 6, BLUE),
+    ("EUROPE", 6, PURPLE),
+    ("ASIA", 5, TEAL),
+    ("SOUTH AMERICA", 5, ORANGE),
+    ("NORTH AMERICA", 4, NAVY2),
+    ("MIDEAST", 3, REDDK),
 ]
-TOTAL_STORIES = 32
+TOTAL_STORIES = 38
 
 DATE_CHECK = (
-    "Left out on purpose -- they belong to other days: COP31 collapses with no deal "
-    "(Sun 22 Nov); 186 drones over Ukraine, 4 killed in Dymer (Sun 22 Nov); "
-    "Hong Kong elects its Election Committee, 98.79% turnout (Sun 22 Nov); DRC and Kenya "
-    "restore ties (Sun 22 Nov); Korea's education minister resigns (Sun 22 Nov); "
-    "Gaza ground push (Wed 18 Nov); Hormuz: IRGC claims an MQ-9 shot down, two tankers "
-    "ablaze (Sat 21 Nov); Peru 6.8 quake (Fri 20 Nov); Maluku 7.2 quake (Sat 21 Nov); "
-    "EU-Indonesia trade deal (Sat 21 Nov); Fred Nile dies, 92, and MP Wadkute dies "
-    "(Sat 21 Nov); Kota crash, 9 dead (Sat night); Princess of Wales 'Heal' (Sat 21 Nov); "
-    "Bigfoot files (Fri 20 Nov); Wallabies beat Wales 29-26 (Sat 21 Nov); Verstappen wins "
-    "in Las Vegas, ATP final, Liverpool-Man Utd (Sun 22 Nov). "
-    "NOT YET DECIDED WHEN DRAWN (early Monday, WIB): the Nepal-Modi talks; the "
-    "Wellington Test; the Vikings-49ers score; the flash PMIs."
+    "Left out on purpose -- they belong to other days: COP31 talks collapse "
+    "with no deal (Sun 22 Nov); Liverpool 4-0 Man Utd (Sun 22 Nov); Hong Kong "
+    "elects its Election Committee, 98.79% turnout (Sun 22 Nov); the Merkury "
+    "is hit at Benghazi port (Sun 22 Nov) -- Kyiv confirmed it Monday; the "
+    "Serang factory fire (Sat 21 Nov) -- Monday's death toll is on this "
+    "page; Bolsonaro is admitted to intensive care (Fri 20 Nov) -- Monday's "
+    "update is on this page; Peru's 6.7 quake (Fri 20 Nov); Norway court "
+    "voids three oil licences (Fri 13 Nov); Nigeria boat disaster, 24 dead "
+    "(Sun 22 Nov); Sparta II ablaze off Finland (Sun 22 Nov); Cyclone Akvan "
+    "(Sat 21 Nov). NOT YET DECIDED WHEN DRAWN (late Monday, WIB): HPE's Q4 "
+    "results, due after the close; Dell and HP report Tuesday; the Seoul "
+    "Metro strike decision, Wednesday."
 )
 
 
@@ -624,70 +663,83 @@ def person(fb, x, y, h, shirt, skin=(214, 164, 120), pants=INK):
     fb.rect(x + 1, y - h // 2 + 2 * r, r - 1, h // 2 - 2 * r, pants)
 
 
-def scene_delhi(fb, x, y, w, h):
-    fb.rect(x, y, w, h, SKY)
-    fb.disc(x + w - 26, y + 20, 13, (250, 214, 120))  # sun
-    fb.rect(x, y + h - 26, w, 26, (120, 150, 110))    # lawn
-    # India Gate-ish arch
-    ax, ay, aw, ah = x + w // 2 - 26, y + h - 78, 52, 52
-    fb.rect(ax, ay, aw, ah, (196, 164, 120))
-    fb.rect(ax + 14, ay + 26, 24, 26, SKY)
-    fb.disc(ax + 26, ay + 26, 12, SKY)
-    fb.rect(ax - 4, ay - 6, aw + 8, 8, (170, 138, 96))
-    # two flags
-    for fx, c1, c2 in ((x + 16, (255, 153, 51), (19, 136, 8)),
-                       (x + w - 30, (220, 20, 60), (0, 56, 147))):
-        fb.rect(fx, y + 18, 2, 62, (90, 70, 50))
-        fb.rect(fx + 2, y + 18, 22, 8, c1)
-        fb.rect(fx + 2, y + 26, 22, 8, WHITE)
-        fb.rect(fx + 2, y + 34, 22, 8, c2)
-    # two figures shaking hands
-    person(fb, x + w // 2 - 52, y + h - 26, 34, NAVY2)
-    person(fb, x + w // 2 + 52, y + h - 26, 34, RED2)
+def scene_chip(fb, x, y, w, h):
+    """A GPU on a dark board, with a green arrow climbing."""
+    fb.rect(x, y, w, h, (14, 22, 44))
+    # gold circuit traces
+    for ty in (y + 12, y + h - 12):
+        fb.hline(x + 8, ty, w - 16, (150, 120, 50))
+    fb.vline(x + 14, y + 8, h - 16, (150, 120, 50))
+    fb.vline(x + w - 14, y + 8, h - 16, (150, 120, 50))
+    # climbing arrow, drawn before the chip so the chip sits on top
+    ax0, ay0 = x + 16, y + h - 16
+    fb.thick_line(ax0, ay0, x + w - 40, y + 14, 4, NVGRN)
+    fb.tri((x + w - 40, y + 14), (x + w - 56, y + 16), (x + w - 42, y + 30), NVGRN)
+    # the chip
+    cx, cy, s = x + w // 2 - 30, y + h // 2 - 26, 52
+    for i in range(6):
+        fb.rect(cx - 6, cy + 4 + i * 8, 6, 4, GOLD)
+        fb.rect(cx + s, cy + 4 + i * 8, 6, 4, GOLD)
+    fb.rect(cx, cy, s, s, NVGRN)
+    fb.rect(cx + 8, cy + 8, s - 16, s - 16, (60, 110, 0))
+    draw_text(fb, cx + 14, cy + 22, "NVDA", 1, WHITE)
+    draw_text(fb, x + w - 62, y + 30, "+33%", 2, NVGRN)
 
 
-def scene_factory(fb, x, y, w, h):
-    fb.rect(x, y, w, h, (44, 44, 52))  # night sky
-    fb.disc(x + w - 24, y + 16, 9, (240, 230, 200))
-    # factory block
-    fb.rect(x + 8, y + h - 52, w - 16, 52, (120, 96, 70))
-    fb.rect(x + 8, y + h - 62, w - 16, 12, (96, 76, 56))
-    for wx in range(x + 18, x + w - 18, 26):
-        fb.rect(wx, y + h - 44, 16, 12, (255, 196, 90))
+def scene_ship(fb, x, y, w, h):
+    """A corvette at sea, hit: blast, smoke, drone boats."""
+    fb.rect(x, y, w, h * 55 // 100, SKY)
+    fb.rect(x, y + h * 55 // 100, w, h - h * 55 // 100, SEADK)
+    fb.disc(x + 26, y + 14, 10, (250, 214, 120))
+    # hull with a pointed bow (right) and flat stern (left)
+    hy = y + h - 34
+    fb.poly([(x + 28, hy), (x + w - 60, hy), (x + w - 24, hy + 8),
+             (x + w - 34, hy + 16), (x + 40, hy + 16)], (96, 100, 108))
+    fb.rect(x + 28, hy, w - 88, 3, (120, 124, 132))  # deck edge
+    # superstructure: bridge block, funnel, mast with flag
+    fb.rect(x + w // 2 - 20, hy - 18, 48, 18, (120, 124, 132))
+    fb.rect(x + w // 2 + 30, hy - 30, 10, 12, (70, 74, 80))
+    fb.rect(x + w // 2 + 8, hy - 34, 3, 34, (70, 74, 80))
+    fb.rect(x + w // 2 + 11, hy - 34, 12, 7, RED)
+    fb.rect(x + w // 2 - 14, hy - 14, 8, 6, (200, 220, 240))
+    fb.rect(x + w // 2 - 2, hy - 14, 8, 6, (200, 220, 240))
+    # blast at the stern
+    bx, by = x + 52, hy - 6
+    fb.disc(bx, by, 16, FLAME)
+    fb.disc(bx, by, 9, (255, 210, 60))
+    fb.tri((bx - 18, by + 4), (bx, by - 24), (bx + 18, by + 4), FLAME)
+    fb.tri((bx - 8, by + 2), (bx + 4, by - 16), (bx + 14, by + 2), (255, 210, 60))
     # smoke
-    for i, (sx, sy, sr) in enumerate(((x + 40, y + 22, 12), (x + 62, y + 12, 15),
-                                      (x + 88, y + 26, 10), (x + w - 60, y + 18, 13))):
-        fb.disc(sx, sy, sr, (150, 150, 155))
-        fb.disc(sx + 6, sy - 6, sr - 3, (170, 170, 175))
-    # flames
-    fb.tri((x + 30, y + h - 52), (x + 44, y + h - 74), (x + 58, y + h - 52), (255, 120, 20))
-    fb.tri((x + w - 70, y + h - 52), (x + w - 56, y + h - 68), (x + w - 42, y + h - 52), (255, 170, 40))
-    # rescue figures with helmets
-    person(fb, x + w - 40, y + h, 30, (255, 220, 40))
-    fb.disc(x + w - 40, y + h - 28, 5, WHITE)
-    person(fb, x + 26, y + h, 28, (40, 120, 200))
-    fb.disc(x + 26, y + h - 26, 5, WHITE)
+    for sx, sy, sr in ((bx - 8, by - 26, 9), (bx + 6, by - 34, 11),
+                       (bx + 18, by - 26, 8)):
+        fb.disc(sx, sy, sr, (140, 140, 145))
+    # drone boats with wakes
+    for dx in (x + w - 92, x + w - 62, x + 120):
+        fb.rect(dx, y + h - 14, 18, 6, (30, 34, 40))
+        fb.rect(dx + 4, y + h - 18, 8, 4, (50, 54, 60))
+        fb.hline(dx - 20, y + h - 11, 20, WHITE)
+    fb.hline(x + 10, y + h - 22, 30, WHITE)
+    fb.hline(x + w - 120, y + h - 26, 26, WHITE)
 
 
 def scene_cricket(fb, x, y, w, h):
+    """The final day at the Basin Reserve: bat, ball, draw."""
     fb.rect(x, y, w, h, SKY)
     fb.disc(x + 24, y + 16, 11, (250, 214, 120))
-    fb.rect(x, y + h - 58, w, 58, (74, 148, 74))   # outfield
-    fb.rect(x + w // 2 - 14, y + h - 58, 28, 58, (214, 196, 150))  # pitch
-    # stumps
+    fb.rect(x, y + h - 58, w, 58, (74, 148, 74))
+    fb.rect(x + w // 2 - 14, y + h - 58, 28, 58, SAND)
     for sx in (x + w // 2 - 8, x + w // 2 - 2, x + w // 2 + 4):
         fb.rect(sx, y + h - 40, 2, 12, (250, 220, 130))
-    # batsman
-    person(fb, x + w // 2 - 34, y + h - 22, 36, (30, 90, 170))
-    fb.thick_line(x + w // 2 - 30, y + h - 40, x + w // 2 - 18, y + h - 22, 3, (160, 110, 60))
-    # fielder + crowd dots
+    person(fb, x + w // 2 - 36, y + h - 22, 36, (30, 90, 170))
+    fb.thick_line(x + w // 2 - 32, y + h - 40, x + w // 2 - 18, y + h - 22,
+                  3, (160, 110, 60))
     person(fb, x + w - 34, y + h - 22, 30, RED)
     for i in range(14):
         cx = x + 8 + (i * 23) % (w - 16)
         fb.disc(cx, y + h - 52, 2, (200, 60, 60) if i % 3 == 0 else WHITE)
-    # scoreboard
-    fb.rect(x + 8, y + 8, 74, 20, INK)
-    draw_text(fb, x + 12, y + 13, "720/9", 1, (255, 220, 90))
+    fb.rect(x + 8, y + 8, 76, 20, INK)
+    draw_text(fb, x + 12, y + 13, "239/5", 1, (255, 220, 90))
+    draw_text(fb, x + 90, y + 13, "DRAW", 1, WHITE)
 
 
 def _mini_sky(fb, x, y, w, h):
@@ -695,131 +747,182 @@ def _mini_sky(fb, x, y, w, h):
     fb.rect(x, y + h - 12, w, 12, (120, 150, 110))
 
 
-def scene_plane(fb, x, y, w, h):
+def scene_factory(fb, x, y, w, h):
+    fb.rect(x, y, w, h, (44, 44, 52))
+    fb.disc(x + w - 22, y + 12, 7, (240, 230, 200))
+    fb.rect(x + 6, y + h - 22, w - 12, 22, (120, 96, 70))
+    fb.rect(x + 6, y + h - 26, w - 12, 5, (96, 76, 56))
+    for wx in range(x + 14, x + w - 14, 22):
+        fb.rect(wx, y + h - 18, 12, 8, (255, 196, 90))
+    for sx, sy, sr in ((x + 36, y + 10, 8), (x + 54, y + 5, 10),
+                       (x + w - 52, y + 8, 8)):
+        fb.disc(sx, sy, sr, (150, 150, 155))
+    fb.tri((x + 26, y + h - 22), (x + 36, y + h - 34), (x + 46, y + h - 22), FLAME)
+    fb.tri((x + w - 56, y + h - 22), (x + w - 46, y + h - 32), (x + w - 36, y + h - 22),
+           (255, 170, 40))
+    person(fb, x + w - 30, y + h, 22, (255, 220, 40))
+    fb.disc(x + w - 30, y + h - 20, 4, WHITE)
+    person(fb, x + 20, y + h, 20, (40, 120, 200))
+    fb.disc(x + 20, y + h - 18, 4, WHITE)
+
+
+def scene_delhi(fb, x, y, w, h):
     _mini_sky(fb, x, y, w, h)
-    fb.rect(x, y + h - 6, w, 3, (80, 80, 80))
-    fb.poly([(x + 8, y + 18), (x + w - 14, y + 14), (x + w - 8, y + 20),
-             (x + 30, y + 26), (x + 12, y + 26)], WHITE)
-    fb.tri((x + w - 22, y + 12), (x + w - 10, y + 12), (x + w - 14, y + 20), RED)
-    fb.disc(x + 16, y + 30, 3, (40, 40, 40))
-    fb.disc(x + 34, y + 30, 3, (40, 40, 40))
+    fb.disc(x + w - 22, y + 10, 7, (250, 214, 120))
+    ax, ay, aw, ah = x + w // 2 - 16, y + h - 34, 32, 24
+    fb.rect(ax, ay, aw, ah, (196, 164, 120))
+    fb.rect(ax + 9, ay + 12, 14, 12, SKY)
+    fb.disc(ax + 16, ay + 12, 7, SKY)
+    fb.rect(ax - 3, ay - 3, aw + 6, 4, (170, 138, 96))
+    for fx, c1, c2 in ((x + 10, (255, 153, 51), (19, 136, 8)),
+                       (x + w - 26, (220, 20, 60), (0, 56, 147))):
+        fb.rect(fx, y + 6, 2, 26, (90, 70, 50))
+        fb.rect(fx + 2, y + 6, 14, 4, c1)
+        fb.rect(fx + 2, y + 10, 14, 4, WHITE)
+        fb.rect(fx + 2, y + 14, 14, 4, c2)
+    person(fb, x + w // 2 - 34, y + h - 12, 18, NAVY2)
+    person(fb, x + w // 2 + 34, y + h - 12, 18, REDDK)
 
 
-def scene_poll(fb, x, y, w, h):
-    fb.rect(x, y, w, h, PAPER2)
-    fb.rect(x, y + h - 4, w, 4, RULE)
-    bars = [(8, 26, RED), (30, 20, BLUE), (52, 14, TEAL)]
-    for bx, bh, c in bars:
-        fb.rect(x + bx, y + h - 6 - bh, 16, bh, c)
-    draw_text(fb, x + 8, y + 4, "55-45", 1, INK)
+def scene_kyiv(fb, x, y, w, h):
+    fb.rect(x, y, w, h, (196, 168, 140))
+    fb.rect(x, y + h - 8, w, 8, (90, 80, 70))
+    for bx, bw, bh in ((x + 6, 26, 22), (x + 36, 20, 28), (x + 60, 30, 18),
+                       (x + 94, 22, 26), (x + 120, 28, 20), (x + 152, 24, 30)):
+        fb.rect(bx, y + h - 8 - bh, bw, bh, (70, 66, 62))
+    for sx, sy, sr in ((x + 46, y + 6, 8), (x + 56, y + 2, 9),
+                       (x + 164, y + 4, 8), (x + 172, y + 10, 6)):
+        fb.disc(sx, sy, sr, (130, 128, 124))
+    fb.tri((x + 40, y + h - 34), (x + 46, y + h - 44), (x + 52, y + h - 34), FLAME)
+    fb.tri((x + 158, y + h - 36), (x + 164, y + h - 46), (x + 170, y + h - 36),
+           (255, 170, 40))
 
 
-def scene_gate(fb, x, y, w, h):
-    fb.rect(x, y, w, h, (226, 220, 204))
-    for gx in range(x + 6, x + w - 6, 10):
-        fb.vline(gx, y + 8, h - 16, (120, 110, 96))
-    fb.rect(x, y + 8, w, 4, INK)
-    fb.rect(x + w // 2 - 16, y + h // 2 - 6, 32, 12, RED)
-    draw_text(fb, x + w // 2 - 13, y + h // 2 - 3, "SHUT", 1, WHITE)
-
-
-def scene_quake(fb, x, y, w, h):
-    fb.rect(x, y, w, h, PAPER2)
-    fb.rect(x, y + h // 2, w, 2, LGREY)
-    pts = [(x + 4, y + h // 2), (x + 14, y + h // 2), (x + 20, y + 6),
-           (x + 28, y + h - 6), (x + 36, y + h // 2), (x + 48, y + 8),
-           (x + 56, y + h - 8), (x + 66, y + h // 2), (x + w - 4, y + h // 2)]
-    for i in range(len(pts) - 1):
-        fb.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], RED)
-    draw_text(fb, x + 6, y + 4, "M4.6", 1, INK)
-
-
-def scene_storm(fb, x, y, w, h):
-    fb.rect(x, y, w, h, (90, 100, 120))
-    fb.disc(x + 20, y + 12, 10, (220, 224, 230))
-    fb.disc(x + 34, y + 9, 12, (235, 238, 242))
-    fb.disc(x + 48, y + 13, 9, (220, 224, 230))
-    fb.poly([(x + 34, y + 22), (x + 26, y + h - 4), (x + 34, y + h - 4),
-             (x + 28, y + 26)], (255, 220, 60))
-    fb.rect(x, y + h - 8, w, 8, (60, 90, 130))
-
-
-def scene_chart(fb, x, y, w, h):
-    fb.rect(x, y, w, h, PAPER2)
-    fb.rect(x, y + h - 4, w, 4, RULE)
-    vals = [10, 18, 14, 24, 20, 30]
-    for i, v in enumerate(vals):
-        fb.rect(x + 6 + i * 11, y + h - 6 - v, 8, v,
-                BLUE if i % 2 == 0 else TEAL)
-    fb.line(x + 4, y + 6, x + w - 6, y + h - 12, RED)
-
-
-def scene_ballot(fb, x, y, w, h):
-    fb.rect(x, y, w, h, PAPER2)
-    fb.rect(x + 14, y + h - 20, w - 28, 16, (150, 110, 70))
-    fb.rect(x + 14, y + h - 24, w - 28, 4, (120, 86, 52))
-    fb.rect(x + w // 2 - 12, y + 4, 24, 12, WHITE)
-    fb.line(x + w // 2 - 8, y + 8, x + w // 2 - 2, y + 14, RED)
-    fb.line(x + w // 2 - 2, y + 14, x + w // 2 + 10, y + 4, RED)
-    draw_text(fb, x + 8, y + h - 34, "VOTE", 1, INK)
-
-
-def scene_parliament(fb, x, y, w, h):
-    _mini_sky(fb, x, y, w, h)
-    fb.rect(x + 10, y + h - 22, w - 20, 10, (200, 190, 160))
-    for cx in range(x + 16, x + w - 12, 12):
-        fb.rect(cx, y + h - 34, 4, 12, (220, 210, 180))
-    fb.rect(x + 10, y + h - 36, w - 20, 3, (200, 190, 160))
-    fb.disc(x + w // 2, y + h - 36, 12, (200, 190, 160))
-    fb.rect(x + w // 2 - 1, y + h - 52, 2, 6, GOLD)
-
-
-def scene_procession(fb, x, y, w, h):
-    _mini_sky(fb, x, y, w, h)
-    fb.rect(x, y + h - 10, w, 10, (150, 130, 100))
-    for i, fx in enumerate((x + 12, x + 34, x + 56)):
-        fb.rect(fx, y + 6, 2, 22, (90, 70, 50))
-        fb.rect(fx + 2, y + 6, 12, 6, (255, 153, 51) if i % 2 == 0 else (30, 90, 170))
-    person(fb, x + 18, y + h - 10, 22, (255, 153, 51))
-    person(fb, x + 40, y + h - 10, 22, (30, 90, 170))
-    person(fb, x + 62, y + h - 10, 22, RED)
+def scene_gaza(fb, x, y, w, h):
+    fb.rect(x, y, w, h, SAND)
+    fb.rect(x, y + h - 8, w, 8, (170, 150, 110))
+    # damaged building
+    fb.poly([(x + 8, y + h - 8), (x + 8, y + 10), (x + 20, y + 6),
+             (x + 30, y + 12), (x + 44, y + 8), (x + 52, y + 14),
+             (x + 52, y + h - 8)], (150, 144, 132))
+    fb.rect(x + 18, y + 18, 8, 8, (60, 56, 50))
+    # water well
+    fb.rect(x + w - 60, y + h - 22, 4, 14, (90, 70, 50))
+    fb.rect(x + w - 34, y + h - 22, 4, 14, (90, 70, 50))
+    fb.rect(x + w - 62, y + h - 24, 32, 3, (90, 70, 50))
+    fb.circle(x + w - 46, y + h - 10, 9, (120, 116, 108))
+    fb.disc(x + w - 46, y + h - 10, 6, (80, 120, 170))
+    # blue flag
+    fb.rect(x + w - 14, y + 6, 2, 22, (90, 70, 50))
+    fb.rect(x + w - 12, y + 6, 12, 7, (60, 120, 200))
+    person(fb, x + 76, y + h - 8, 18, (200, 120, 60))
+    person(fb, x + 100, y + h - 8, 18, TEAL)
 
 
 def scene_football(fb, x, y, w, h):
     fb.rect(x, y, w, h, (74, 148, 74))
-    fb.rect(x, y + h // 2 - 1, w, 2, WHITE)
-    fb.disc(x + w // 2, y + h // 2, 10, (120, 90, 50))
-    fb.line(x + w // 2 - 10, y + h // 2, x + w // 2 + 10, y + h // 2, WHITE)
-    fb.line(x + w // 2 - 6, y + h // 2 - 6, x + w // 2 - 6, y + h // 2 + 6, WHITE)
-    fb.line(x + w // 2 + 6, y + h // 2 - 6, x + w // 2 + 6, y + h // 2 + 6, WHITE)
-    person(fb, x + 16, y + h - 6, 20, WHITE)
-    person(fb, x + w - 16, y + h - 6, 20, NAVY2)
+    for lx in range(x + 20, x + w - 10, 28):
+        fb.vline(lx, y, h, (140, 200, 140))
+    # goalpost: two uprights, a crossbar, a centre post
+    fb.rect(x + w - 24, y + 4, 3, 10, (250, 220, 90))
+    fb.rect(x + w - 6, y + 4, 3, 10, (250, 220, 90))
+    fb.rect(x + w - 24, y + 12, 21, 3, (250, 220, 90))
+    fb.rect(x + w - 14, y + 14, 3, 14, (250, 220, 90))
+    fb.disc(x + w // 2, y + h // 2, 7, (120, 90, 50))
+    fb.hline(x + w // 2 - 7, y + h // 2, 14, WHITE)
+    person(fb, x + 16, y + h - 4, 18, WHITE)
+    person(fb, x + w - 34, y + h - 4, 18, NAVY2)
+    draw_text(fb, x + 6, y + 4, "35-10", 1, WHITE)
+
+
+def scene_chart(fb, x, y, w, h):
+    fb.rect(x, y, w, h, PANEL)
+    fb.rect(x, y + h - 4, w, 4, RULE)
+    vals = [8, 12, 11, 16, 15, 20]
+    for i, v in enumerate(vals):
+        fb.rect(x + 8 + i * 12, y + h - 6 - v, 9, v,
+                BLUE if i % 2 == 0 else TEAL)
+    fb.line(x + 8, y + h - 14, x + w - 8, y + 8, RED)
+    draw_text(fb, x + 6, y + 3, "51.7", 1, INK)
+
+
+def scene_chart2(fb, x, y, w, h):
+    fb.rect(x, y, w, h, PANEL)
+    fb.rect(x, y + h - 4, w, 4, RULE)
+    vals = [20, 17, 18, 14, 13, 10]
+    for i, v in enumerate(vals):
+        fb.rect(x + 8 + i * 12, y + h - 6 - v, 9, v,
+                NAVY2 if i % 2 == 0 else GREY)
+    fb.line(x + 8, y + 8, x + w - 8, y + h - 14, RED)
+    draw_text(fb, x + 6, y + 3, "54.6", 1, INK)
+
+
+def scene_retail(fb, x, y, w, h):
+    fb.rect(x, y, w, h, PANEL)
+    fb.rect(x + 20, y + 6, w - 40, h - 10, (220, 210, 190))
+    for i in range(6):
+        fb.rect(x + 20 + i * 12, y + 6, 12, 7,
+                RED if i % 2 == 0 else WHITE)
+    fb.rect(x + w // 2 - 8, y + h - 14, 16, 10, (90, 70, 50))
+    fb.rect(x + 28, y + 18, 14, 10, SKY)
+    fb.rect(x + w - 42, y + 18, 14, 10, SKY)
+    fb.rect(x + 34, y + h - 10, 10, 8, TEAL)
+    fb.rect(x + w - 48, y + h - 10, 10, 8, ORANGE)
+    draw_text(fb, x + 6, y + 3, "+2.2%", 1, GREEN)
+
+
+def scene_poll(fb, x, y, w, h):
+    fb.rect(x, y, w, h, PANEL)
+    fb.rect(x, y + h - 4, w, 4, RULE)
+    fb.rect(x + 22, y + h - 6 - 26, 26, 26, RED)
+    fb.rect(x + 58, y + h - 6 - 25, 26, 25, BLUE)
+    draw_text(fb, x + 26, y + h - 6 - 34, "42", 1, REDDK)
+    draw_text(fb, x + 62, y + h - 6 - 33, "41", 1, NAVY2)
+    draw_text(fb, x + w - 46, y + 4, "42-41", 1, INK)
+
+
+def scene_quake(fb, x, y, w, h):
+    fb.rect(x, y, w, h, PANEL)
+    fb.rect(x, y + h // 2, w, 2, LGREY)
+    pts = [(x + 4, y + h // 2), (x + 16, y + h // 2), (x + 24, y + 5),
+           (x + 32, y + h - 5), (x + 40, y + h // 2), (x + 54, y + 7),
+           (x + 62, y + h - 7), (x + 74, y + h // 2), (x + w - 4, y + h // 2)]
+    for i in range(len(pts) - 1):
+        fb.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], RED)
+    draw_text(fb, x + 6, y + 3, "M6.5", 1, INK)
 
 
 SCENES = {
-    "delhi": scene_delhi, "factory": scene_factory, "cricket": scene_cricket,
-    "plane": scene_plane, "poll": scene_poll, "gate": scene_gate,
-    "quake": scene_quake, "storm": scene_storm, "chart": scene_chart,
-    "ballot": scene_ballot, "parliament": scene_parliament,
-    "procession": scene_procession, "football": scene_football,
+    "chip": scene_chip, "ship": scene_ship, "cricket": scene_cricket,
+    "factory": scene_factory, "delhi": scene_delhi, "kyiv": scene_kyiv,
+    "gaza": scene_gaza, "football": scene_football, "chart": scene_chart,
+    "chart2": scene_chart2, "retail": scene_retail, "poll": scene_poll,
+    "quake": scene_quake,
 }
+
 
 # ------------------------------------------------------------------- map
 CONTINENTS = [
+    # North America
     [(-168, 66), (-140, 70), (-125, 72), (-110, 73), (-95, 80), (-80, 73),
      (-70, 62), (-55, 52), (-60, 45), (-75, 35), (-80, 25), (-90, 20),
      (-97, 16), (-105, 20), (-115, 28), (-125, 40), (-125, 49), (-140, 60),
      (-155, 58), (-165, 60)],
+    # Greenland
     [(-58, 64), (-45, 60), (-30, 68), (-40, 76), (-58, 74)],
+    # South America
     [(-80, 10), (-70, 12), (-60, 5), (-50, 0), (-40, -5), (-35, -10),
      (-40, -20), (-50, -30), (-60, -38), (-70, -50), (-73, -40), (-72, -20),
      (-80, -5)],
+    # Europe
     [(-10, 36), (-10, 44), (0, 48), (-5, 50), (5, 53), (8, 57), (18, 56),
      (21, 55), (28, 59), (30, 70), (40, 68), (45, 60), (40, 55), (30, 45),
      (28, 40), (23, 36), (18, 40), (12, 44), (8, 44), (3, 42), (-2, 37)],
+    # Africa
     [(-17, 15), (-10, 30), (0, 36), (10, 37), (20, 32), (30, 31), (35, 28),
      (43, 12), (51, 10), (48, 0), (40, -10), (35, -20), (30, -28),
      (20, -35), (15, -30), (12, -18), (8, -5), (9, 4), (-8, 5)],
+    # Asia
     [(40, 68), (50, 70), (60, 70), (70, 73), (90, 75), (110, 76), (130, 72),
      (160, 70), (178, 66), (170, 60), (162, 55), (158, 50), (142, 45),
      (140, 38), (130, 35), (127, 33), (122, 38), (120, 30), (115, 22),
@@ -827,6 +930,7 @@ CONTINENTS = [
      (77, 8), (72, 20), (66, 25), (60, 25), (55, 26), (52, 28), (48, 30),
      (44, 29), (40, 36), (36, 36), (30, 36), (35, 42), (40, 45), (42, 55),
      (40, 60)],
+    # Australia
     [(113, -22), (114, -30), (115, -35), (124, -33), (130, -32), (137, -35),
      (140, -38), (147, -39), (150, -37), (153, -27), (150, -22), (146, -19),
      (142, -15), (142, -11), (136, -12), (132, -12), (126, -14), (122, -17),
@@ -835,18 +939,36 @@ CONTINENTS = [
 ISLANDS = [(95, 0), (102, -2), (110, -7), (118, -5), (125, -3), (132, -4),
            (167, -38), (172, -41), (178, -18), (139, 35), (141, 38)]
 
+# Story number -> (lon, lat) for the map pins.
+PINS = [
+    (1, -122.0, 37.4), (2, 20.1, 32.1), (3, 174.8, -41.3),
+    (4, 106.1, -6.1), (5, 77.2, 28.6), (6, 30.5, 50.5),
+    (7, 34.5, 31.5), (8, -99.1, 19.4), (9, 4.3, 50.8),
+    (10, -74.0, 40.7), (11, 172.6, -43.5), (12, 149.1, -35.3),
+    (13, 167.5, -15.5), (14, -47.9, -15.8), (15, -47.9, -15.8),
+    (16, -72.5, 7.9), (17, -77.0, -12.0), (18, -75.5, -11.0),
+    (19, 7.5, 9.1), (20, 6.7, 0.3), (21, 36.8, -1.3),
+    (22, -0.2, 5.6), (23, 3.4, 6.5), (24, -16.6, 13.5),
+    (25, 36.8, -1.3), (26, 127.0, 37.5), (27, 139.7, 35.7),
+    (28, 151.2, -33.9), (29, 114.2, 22.3), (30, 30.7, 36.9),
+    (31, 34.5, 31.5), (32, 56.3, 58.0), (33, 54.4, 24.5),
+    (34, 145.0, -37.8), (35, -0.1, 51.5), (36, -99.1, 19.4),
+    (37, 7.5, 9.1), (38, 31.2, 30.0),
+]
+
 
 def draw_map(fb, x, y, w, h):
     fb.rect(x, y, w, h, SEA)
-    # graticule
     for gx in range(x + 30, x + w, 30):
         fb.vline(gx, y, h, (120, 165, 205))
     for gy in range(y + 30, y + h, 30):
         fb.hline(x, gy, w, (120, 165, 205))
+
     def proj(lon, lat):
         px = x + int((lon + 170) / 360.0 * w)
         py = y + int((75 - lat) / 130.0 * h)
         return (px, py)
+
     for cont in CONTINENTS:
         fb.poly([proj(lo, la) for lo, la in cont], LAND)
         pts = [proj(lo, la) for lo, la in cont]
@@ -856,15 +978,8 @@ def draw_map(fb, x, y, w, h):
     for lo, la in ISLANDS:
         px, py = proj(lo, la)
         fb.disc(px, py, 3, LAND)
-    pins = [(1, 77, 28.6), (2, 106, -6.1), (3, 174.8, -41.3),
-            (4, 151.2, -33.9), (6, 139.7, 35.7), (7, 178.4, -18.1),
-            (9, 4.3, 50.8), (10, 145, -37.8), (12, 77, 28.6),
-            (13, -122, 37.4), (14, 140.7, 40.8), (17, 121.5, 25),
-            (18, 116.4, 39.9), (19, -74, 40.7), (20, 127, 37.5),
-            (21, 30.7, 36.9), (22, 38.7, 9), (23, -77, 38.9),
-            (24, 104.9, 11.5), (29, 76.8, 19.3), (32, 29.4, -3.4)]
     seen = {}
-    for n, lo, la in pins:
+    for n, lo, la in PINS:
         px, py = proj(lo, la)
         key = (px // 12, py // 12)
         if key in seen:
@@ -907,13 +1022,13 @@ def build():
     draw_serif(fb, (W - tw) // 2, 44, title, 32, NAVY)
     # --- red subhead
     draw_text_center(fb, W // 2, 108,
-                     "Shah meets Modi  -  Search resumes in Serang  -  India hunt eight wickets",
+                     "Huang back at Nvidia  -  Kyiv sinks a Russian corvette  -  Wellington Test drawn",
                      2, RED)
     fb.hline(M, 124, CW, RULE)
     # --- key numbers
-    nums = [("32", "STORIES"), ("6", "REGIONS"), ("24", "BODY BAGS"),
-            ("29", "STILL MISSING"), ("720/9", "INDIA'S TOTAL"),
-            ("8", "WICKETS NEEDED")]
+    nums = [("+33%", "NVDA SHARES"), ("24", "SERANG DEAD"),
+            ("7", "DRONES SANK SHIP"), ("720/9", "INDIA'S TOTAL"),
+            ("2.2%", "NZ RETAIL SALES"), ("42-41", "TAYLOR LEADS PM")]
     cell = CW // 6
     for i, (big, small) in enumerate(nums):
         cx = M + i * cell
@@ -924,10 +1039,15 @@ def build():
     fb.hline(M, 168, CW, RULE)
     # --- region bar
     bx = M
-    for name, cnt, col in REGIONS:
-        seg = CW * cnt // TOTAL_STORIES
+    used = 0
+    for j, (name, cnt, col) in enumerate(REGIONS):
+        if j == len(REGIONS) - 1:
+            seg = CW - used
+        else:
+            seg = CW * cnt // TOTAL_STORIES
+        used += seg
         fb.rect(bx, 172, seg, 18, col)
-        lab = "%s %d" % (name if cnt >= 2 else name[:2], cnt)
+        lab = "%s %d" % (name, cnt)
         if seg >= text_w(lab, 1) + 4:
             draw_text(fb, bx + (seg - text_w(lab, 1)) // 2, 177, lab, 1, WHITE)
         bx += seg
@@ -935,29 +1055,25 @@ def build():
     fb.rect(M, 194, CW, 20, NAVY)
     draw_text(fb, M + 6, 200, "THE DAY IN UTC", 1, GOLD)
     draw_text(fb, M + 108, 200,
-              "00:00 Serang search resumes  -  01:20 Vikings at 49ers kick off  -  "
-              "MIDDAY Sydney storms due  -  21:00 NY Fed's Williams speaks", 1, WHITE)
+              "01:20 49ers kick off  -  02:40 M6.5 quake off Vanuatu  -  "
+              "09:00 Eurozone PMI 51.7  -  12:01 UNRWA worker killed in Gaza  -  "
+              "14:45 US PMI 54.6", 1, WHITE)
     # --- heroes
     hy, hh = 218, 214
     colw = (CW - 16) // 3
     for i, st in enumerate(HEROES):
         hx = M + i * (colw + 8)
-        # illustration
         SCENES[st["scene"]](fb, hx, hy, colw, 92)
         fb.rect(hx, hy + 92, colw, 2, RULE)
-        # red banner
         fb.rect(hx, hy + 94, colw, 15, RED)
         draw_text(fb, hx + 6, hy + 98, st["kicker"], 1, WHITE)
         badge(fb, hx + colw - text_w(st["badge"], 1) - 15, hy + 4, st["badge"])
-        # kicker line
         draw_text(fb, hx, hy + 114,
                   "%d %s - %s" % (st["n"], st["place"], st["region"]), 1, RED)
-        # headline, bold, max 2 lines
         y = hy + 128
         for ln in wrap(st["head"], 2, colw)[:2]:
             draw_text_bold(fb, hx, y, ln, 2, INK)
             y += 17
-        # body, max 4 lines
         y = hy + 166
         for ln in wrap(st["body"], 1, colw)[:4]:
             draw_text(fb, hx, y, ln, 1, INK)
@@ -985,47 +1101,47 @@ def build():
         draw_text(fb, sx, yy + sh - 8, st["src"], 1, GREY)
     # --- map + more list
     my = 652
-    fb.rect(M, my, 330, 264, PAPER2)
+    fb.rect(M, my, 330, 264, PANEL)
     fb.rect(M, my, 330, 2, RULE)
     draw_text(fb, M + 8, my + 8, "WHERE IT HAPPENED", 2, INK)
     draw_text(fb, M + 8, my + 24, "Pins match story numbers", 1, GREY)
     draw_map(fb, M + 6, my + 38, 318, 218)
     lx = M + 338
     draw_text(fb, lx, my + 8,
-              "ALSO ON MONDAY 23 NOVEMBER - 19 MORE STORIES", 2, INK)
+              "ALSO ON MONDAY 23 NOVEMBER - %d MORE STORIES" % len(MORE), 2, INK)
     fb.hline(lx, my + 26, W - M - lx, RULE)
-    # two columns of the more-list
+    # two columns of the more-list, 13 rows each
     colw2 = (W - M - lx - 12) // 2
     for i, (place, region, head, src, status) in enumerate(MORE):
-        cidx, ridx = divmod(i, 10)
+        cidx, ridx = divmod(i, 13)
         ix = lx + cidx * (colw2 + 12)
-        iy = my + 34 + ridx * 23
+        iy = my + 34 + ridx * 17
         n = 14 + i
         draw_text_bold(fb, ix, iy, "%d." % n, 1, RED)
         tx = ix + text_w("%d. " % n, 1)
-        for j, ln in enumerate(wrap(head, 1, colw2 - text_w("%d. " % n, 1))[:1]):
-            draw_text(fb, tx, iy, ln, 1, INK)
-        draw_text(fb, tx, iy + 10, "%s - %s [%s]" % (place, src, status),
+        draw_text(fb, tx, iy, head, 1, INK)
+        draw_text(fb, tx, iy + 8, "%s - %s [%s]" % (place, src, status),
                   1, GREY)
     # --- DATE CHECK
     dy = 922
-    fb.rect(M, dy, CW, 78, PAPER2)
+    fb.rect(M, dy, CW, 78, PANEL)
     fb.rect(M, dy, CW, 2, RED)
     fb.rect(M, dy + 76, CW, 2, RED)
     fb.rect(M, dy, 2, 78, RED)
     fb.rect(M + CW - 2, dy, 2, 78, RED)
-    draw_text(fb, M + 8, dy + 7, "DATE CHECK - READ THIS FIRST", 1, RED2)
+    draw_text(fb, M + 8, dy + 7, "DATE CHECK - READ THIS FIRST", 1, REDDK)
     y = dy + 19
     for ln in wrap(DATE_CHECK, 1, CW - 16)[:6]:
         draw_text(fb, M + 8, y, ln, 1, INK)
         y += 9
     # --- footer
     draw_text(fb, M, 1006,
-              "Sources: Reuters, AP, AFP, Al Jazeera, BBC, The Guardian, ABC, AAP, "
-              "ESPNcricinfo, Cricbuzz, Xinhua, IANS, official releases.", 1, GREY)
+              "Sources: Reuters, AP, AFP, CNN, WSJ, BBC, ESPNcricinfo, S&P Global, "
+              "Stats NZ, USGS, UN News, Radio Nepal, IANS, Newspoll, BOM, PCHR, CAF, "
+              "official releases.", 1, GREY)
     draw_text(fb, M, 1016,
               "REPORTED = the day's wires  -  CLAIM = one side's account  -  "
-              "FORECAST = still to happen when drawn. "
+              "OFFICIAL = the body itself. "
               "Pictures and map: original, drawn in code.", 1, GREY)
     return fb
 
